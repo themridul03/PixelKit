@@ -28,6 +28,8 @@ export const metadata: Metadata = {
   authors: [{ name: 'PixelKit Engineering' }]
 };
 
+import { GoogleAdScript } from '@/components/ads/GoogleAdScript';
+
 export default function RootLayout({
   children,
 }: {
@@ -35,6 +37,9 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className="h-full">
+      <head>
+        <GoogleAdScript />
+      </head>
       <body className="min-h-full flex flex-col bg-slate-50/60 dark:bg-slate-950/60 text-slate-900 dark:text-slate-100 antialiased">
         <Navbar />
         <main className="flex-1">{children}</main>

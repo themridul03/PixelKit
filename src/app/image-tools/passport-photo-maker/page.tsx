@@ -1,127 +1,314 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { ToolLayout } from '@/components/tools/ToolLayout';
 import { FileDropzone, FileItem } from '@/components/upload/FileDropzone';
-import { DownloadBar, DownloadItem } from '@/components/download/DownloadBar';
 import { getToolById } from '@/config/tools';
-import { PASSPORT_PRESETS, generatePassportPhoto, PassportPreset } from '@/lib/image/passportPhoto';
+import {
+  PASSPORT_PRESETS,
+  PassportPreset,
+  detectAutoPortraitCrop,
+  generatePassportPhoto,
+  CropRect
+} from '@/lib/image/passportPhoto';
 import { loadImage } from '@/lib/image/imageCore';
-import { UserCheck, Sparkles, Printer, Info } from 'lucide-react';
+import { downloadBlob } from '@/lib/utils/download';
+import {
+  UserCheck,
+  Sparkles,
+  Printer,
+  Sliders,
+  Move,
+  ZoomIn,
+  RotateCw,
+  SunMedium,
+  Download,
+  CheckCircle2,
+  HelpCircle,
+  Eye,
+  RefreshCw,
+  Palette,
+  Layers,
+  ArrowRight
+} from 'lucide-react';
+
+const BG_OPTIONS = [
+  { label: 'Studio White', color: '#ffffff', class: 'bg-white border-slate-300' },
+  { label: 'Light Blue', color: '#e0f2fe', class: 'bg-sky-100 border-sky-300' },
+  { label: 'Light Grey', color: '#f1f5f9', class: 'bg-slate-100 border-slate-300' },
+  { label: 'Warm Cream', color: '#fefce8', class: 'bg-amber-50 border-amber-300' },
+  { label: 'Original', color: 'transparent', class: 'bg-slate-200 border-slate-400' }
+];
 
 export default function PassportPhotoMakerPage() {
   const tool = getToolById('passport-photo-maker')!;
   const [files, setFiles] = useState<FileItem[]>([]);
+  const [loadedImg, setLoadedImg] = useState<HTMLImageElement | null>(null);
+
+  // Mode: 'auto' | 'manual'
+  const [controlMode, setControlMode] = useState<'auto' | 'manual'>('auto');
+
+  // Preset & sheet options
   const [selectedPreset, setSelectedPreset] = useState<PassportPreset>(PASSPORT_PRESETS[0]);
   const [generateSheet, setGenerateSheet] = useState(true);
   const [copiesCount, setCopiesCount] = useState(6);
-  const [cropBox, setCropBox] = useState({ x: 0, y: 0, width: 600, height: 600 });
-  const [imageMeta, setImageMeta] = useState<{ width: number; height: number } | null>(null);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [downloadItems, setDownloadItems] = useState<DownloadItem[]>([]);
-  const previewRef = useRef<HTMLCanvasElement>(null);
+  const [bgColor, setBgColor] = useState<string>('#ffffff');
 
+  // Manual Adjustments
+  const [cropBox, setCropBox] = useState<CropRect>({ x: 0, y: 0, width: 600, height: 600 });
+  const [zoomLevel, setZoomLevel] = useState<number>(100); // 50 to 200%
+  const [panX, setPanX] = useState<number>(0);
+  const [panY, setPanY] = useState<number>(0);
+  const [brightness, setBrightness] = useState<number>(0); // -50 to 50
+  const [contrast, setContrast] = useState<number>(0);     // -50 to 50
+  const [saturation, setSaturation] = useState<number>(0); // -50 to 50
+  const [headGuideScale, setHeadGuideScale] = useState<number>(100);
+
+  // Live Screen Output Previews
+  const [liveSingleUrl, setLiveSingleUrl] = useState<string | null>(null);
+  const [liveSheetUrl, setLiveSheetUrl] = useState<string | null>(null);
+  const [isRenderingLive, setIsRenderingLive] = useState(false);
+
+  // Canvas Refs for interactive drag
+  const alignCanvasRef = useRef<HTMLCanvasElement>(null);
+  const isDraggingRef = useRef(false);
+  const dragStartRef = useRef({ x: 0, y: 0, initPanX: 0, initPanY: 0 });
+
+  // 1. When image is loaded, trigger smart auto-crop
   useEffect(() => {
     if (files.length > 0) {
       loadImage(files[0].file).then((img) => {
-        const w = img.naturalWidth || img.width;
-        const h = img.naturalHeight || img.height;
-        setImageMeta({ width: w, height: h });
-        const boxSize = Math.round(Math.min(w, h) * 0.7);
-        setCropBox({
-          x: Math.round((w - boxSize) / 2),
-          y: Math.round((h - boxSize) / 4), // place head guide near top
-          width: boxSize,
-          height: boxSize
-        });
+        setLoadedImg(img);
+        applySmartAutoCrop(img, selectedPreset);
       });
+    } else {
+      setLoadedImg(null);
+      setLiveSingleUrl(null);
+      setLiveSheetUrl(null);
     }
   }, [files]);
 
-  // Draw biometric portrait guide
+  // When preset changes, recalculate aspect ratio crop
   useEffect(() => {
-    if (!files.length || !imageMeta || !previewRef.current) return;
-    const canvas = previewRef.current;
+    if (loadedImg) {
+      applySmartAutoCrop(loadedImg, selectedPreset);
+    }
+  }, [selectedPreset]);
+
+  const applySmartAutoCrop = (img: HTMLImageElement, preset: PassportPreset) => {
+    const targetAspect = preset.pixelWidth / preset.pixelHeight;
+    const detected = detectAutoPortraitCrop(img, targetAspect);
+    setCropBox(detected);
+    setZoomLevel(100);
+    setPanX(0);
+    setPanY(0);
+  };
+
+  // Re-calculate effective crop with zoom and pan
+  const getEffectiveCropRect = useCallback((): CropRect => {
+    if (!loadedImg) return cropBox;
+    const imgW = loadedImg.naturalWidth || loadedImg.width;
+    const imgH = loadedImg.naturalHeight || loadedImg.height;
+
+    // Zoom modifies the crop box size: higher zoom = smaller crop area
+    const zoomFactor = 100 / Math.max(30, zoomLevel);
+    const effectiveW = Math.round(cropBox.width * zoomFactor);
+    const effectiveH = Math.round(cropBox.height * zoomFactor);
+
+    // Apply pan offset
+    let effX = Math.round(cropBox.x + (cropBox.width - effectiveW) / 2 + panX);
+    let effY = Math.round(cropBox.y + (cropBox.height - effectiveH) / 2 + panY);
+
+    // Keep within bounds
+    if (effX < 0) effX = 0;
+    if (effY < 0) effY = 0;
+    if (effX + effectiveW > imgW) effX = Math.max(0, imgW - effectiveW);
+    if (effY + effectiveH > imgH) effY = Math.max(0, imgH - effectiveH);
+
+    return { x: effX, y: effY, width: effectiveW, height: effectiveH };
+  }, [loadedImg, cropBox, zoomLevel, panX, panY]);
+
+  // Draw alignment overlay canvas
+  useEffect(() => {
+    if (!loadedImg || !alignCanvasRef.current) return;
+    const canvas = alignCanvasRef.current;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    loadImage(files[0].file).then((img) => {
-      canvas.width = Math.min(500, imageMeta.width);
-      const scale = canvas.width / imageMeta.width;
-      canvas.height = imageMeta.height * scale;
+    const imgW = loadedImg.naturalWidth || loadedImg.width;
+    const imgH = loadedImg.naturalHeight || loadedImg.height;
 
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    // Set canvas dimensions
+    const displayWidth = Math.min(500, imgW);
+    const scale = displayWidth / imgW;
+    canvas.width = displayWidth;
+    canvas.height = Math.round(imgH * scale);
 
-      // Dim outside
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(loadedImg, 0, 0, canvas.width, canvas.height);
 
-      // Crop box clear
-      const sx = cropBox.x * scale;
-      const sy = cropBox.y * scale;
-      const sw = cropBox.width * scale;
-      const sh = cropBox.height * scale;
+    // Dim background
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.55)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-      ctx.clearRect(sx, sy, sw, sh);
-      ctx.drawImage(img, cropBox.x, cropBox.y, cropBox.width, cropBox.height, sx, sy, sw, sh);
+    const eff = getEffectiveCropRect();
+    const sx = eff.x * scale;
+    const sy = eff.y * scale;
+    const sw = eff.width * scale;
+    const sh = eff.height * scale;
 
-      // Biometric Head Oval Guide
-      ctx.strokeStyle = '#22c55e';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.ellipse(sx + sw / 2, sy + sh * 0.42, sw * 0.28, sh * 0.35, 0, 0, 2 * Math.PI);
-      ctx.stroke();
+    // Draw active crop area
+    ctx.clearRect(sx, sy, sw, sh);
+    ctx.drawImage(loadedImg, eff.x, eff.y, eff.width, eff.height, sx, sy, sw, sh);
 
-      // Eye line guide
-      ctx.strokeStyle = 'rgba(34, 197, 94, 0.5)';
-      ctx.setLineDash([4, 4]);
-      ctx.beginPath();
-      ctx.moveTo(sx + sw * 0.2, sy + sh * 0.4);
-      ctx.lineTo(sx + sw * 0.8, sy + sh * 0.4);
-      ctx.stroke();
-      ctx.setLineDash([]);
+    // Biometric Head Oval Guide
+    const headScale = headGuideScale / 100;
+    const ovalW = sw * 0.3 * headScale;
+    const ovalH = sh * 0.38 * headScale;
+    const ovalCenterX = sx + sw / 2;
+    const ovalCenterY = sy + sh * 0.42;
 
-      // Outer border
-      ctx.strokeStyle = '#3b82f6';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(sx, sy, sw, sh);
-    });
-  }, [files, imageMeta, cropBox]);
+    ctx.strokeStyle = '#22c55e';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.ellipse(ovalCenterX, ovalCenterY, ovalW, ovalH, 0, 0, 2 * Math.PI);
+    ctx.stroke();
 
-  const handleGenerate = async () => {
-    if (!files.length) return;
-    setIsProcessing(true);
+    // Eye line dashed
+    ctx.strokeStyle = 'rgba(34, 197, 94, 0.8)';
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(ovalCenterX - ovalW * 0.9, ovalCenterY - ovalH * 0.15);
+    ctx.lineTo(ovalCenterX + ovalW * 0.9, ovalCenterY - ovalH * 0.15);
+    ctx.stroke();
+    ctx.setLineDash([]);
 
-    try {
-      const res = await generatePassportPhoto(files[0].file, {
-        preset: selectedPreset,
-        cropRect: cropBox,
-        generatePrintSheet: generateSheet,
-        copiesCount: copiesCount
-      });
+    // Chin reference line
+    ctx.strokeStyle = 'rgba(34, 197, 94, 0.6)';
+    ctx.beginPath();
+    ctx.moveTo(ovalCenterX - ovalW * 0.5, ovalCenterY + ovalH);
+    ctx.lineTo(ovalCenterX + ovalW * 0.5, ovalCenterY + ovalH);
+    ctx.stroke();
 
-      const items: DownloadItem[] = [
-        {
-          name: res.filename,
-          blob: res.singleBlob,
-          originalSize: files[0].file.size
-        }
-      ];
+    // Crop border
+    ctx.strokeStyle = '#3b82f6';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(sx, sy, sw, sh);
 
-      if (res.sheetBlob) {
-        items.push({
-          name: res.filename.replace('.jpg', '_printable_4x6_sheet.jpg'),
-          blob: res.sheetBlob,
-          originalSize: files[0].file.size
+    // Rule of thirds lines
+    ctx.strokeStyle = 'rgba(59, 130, 246, 0.25)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(sx + sw / 3, sy);
+    ctx.lineTo(sx + sw / 3, sy + sh);
+    ctx.moveTo(sx + (2 * sw) / 3, sy);
+    ctx.lineTo(sx + (2 * sw) / 3, sy + sh);
+    ctx.stroke();
+  }, [loadedImg, getEffectiveCropRect, headGuideScale]);
+
+  // Live Screen Render: Updates live preview of single photo and print sheet
+  useEffect(() => {
+    if (!files.length || !loadedImg) return;
+
+    let isMounted = true;
+    const timer = setTimeout(async () => {
+      try {
+        setIsRenderingLive(true);
+        const eff = getEffectiveCropRect();
+        const res = await generatePassportPhoto(files[0].file, {
+          preset: selectedPreset,
+          cropRect: eff,
+          generatePrintSheet: generateSheet,
+          copiesCount: copiesCount,
+          backgroundColor: bgColor,
+          brightness,
+          contrast,
+          saturation
         });
-      }
 
-      setDownloadItems(items);
-    } catch (err: any) {
-      alert(`Error generating passport photo: ${err.message}`);
-    } finally {
-      setIsProcessing(false);
+        if (isMounted) {
+          setLiveSingleUrl(res.singleDataUrl);
+          if (res.sheetDataUrl) setLiveSheetUrl(res.sheetDataUrl);
+        }
+      } catch (e) {
+        console.error('Live render error:', e);
+      } finally {
+        if (isMounted) setIsRenderingLive(false);
+      }
+    }, 150);
+
+    return () => {
+      isMounted = false;
+      clearTimeout(timer);
+    };
+  }, [
+    files,
+    loadedImg,
+    selectedPreset,
+    generateSheet,
+    copiesCount,
+    bgColor,
+    brightness,
+    contrast,
+    saturation,
+    getEffectiveCropRect
+  ]);
+
+  // Mouse & Touch Drag Handlers for direct canvas positioning
+  const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    isDraggingRef.current = true;
+    dragStartRef.current = {
+      x: e.clientX,
+      y: e.clientY,
+      initPanX: panX,
+      initPanY: panY
+    };
+  };
+
+  const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!isDraggingRef.current) return;
+    const dx = e.clientX - dragStartRef.current.x;
+    const dy = e.clientY - dragStartRef.current.y;
+    // Map screen movement to pan
+    setPanX(dragStartRef.current.initPanX + dx * 2);
+    setPanY(dragStartRef.current.initPanY + dy * 2);
+  };
+
+  const handleMouseUp = () => {
+    isDraggingRef.current = false;
+  };
+
+  // Download actions
+  const handleDownloadSingle = async () => {
+    if (!files.length) return;
+    const eff = getEffectiveCropRect();
+    const res = await generatePassportPhoto(files[0].file, {
+      preset: selectedPreset,
+      cropRect: eff,
+      generatePrintSheet: false,
+      backgroundColor: bgColor,
+      brightness,
+      contrast,
+      saturation
+    });
+    downloadBlob(res.singleBlob, res.filename);
+  };
+
+  const handleDownloadSheet = async () => {
+    if (!files.length) return;
+    const eff = getEffectiveCropRect();
+    const res = await generatePassportPhoto(files[0].file, {
+      preset: selectedPreset,
+      cropRect: eff,
+      generatePrintSheet: true,
+      copiesCount: copiesCount,
+      backgroundColor: bgColor,
+      brightness,
+      contrast,
+      saturation
+    });
+    if (res.sheetBlob) {
+      downloadBlob(res.sheetBlob, res.filename.replace('.jpg', '_printable_4x6_sheet.jpg'));
     }
   };
 
@@ -130,121 +317,348 @@ export default function PassportPhotoMakerPage() {
       <div className="space-y-6">
         <FileDropzone
           acceptedFormats={['image/jpeg', 'image/png', 'image/webp']}
-          maxFileSizeMB={30}
+          maxFileSizeMB={40}
           multiple={false}
           files={files}
-          onFilesChange={(newFiles) => {
-            setFiles(newFiles);
-            setDownloadItems([]);
-          }}
+          onFilesChange={(newFiles) => setFiles(newFiles)}
           title="Upload headshot portrait photo"
-          subtitle="Looking straight into the camera with neutral expression"
+          subtitle="Looking straight into the camera with neutral expression on plain background"
         />
 
-        {files.length > 0 && imageMeta && downloadItems.length === 0 && (
-          <div className="bg-slate-50 dark:bg-slate-800/60 rounded-2xl p-6 border border-slate-200 dark:border-slate-700 space-y-6">
-            <div className="flex items-center gap-2 font-bold text-slate-900 dark:text-white text-base">
-              <UserCheck className="w-5 h-5 text-blue-600" />
-              <span>Select Passport &amp; Visa Specifications</span>
-            </div>
+        {loadedImg && (
+          <div className="space-y-6">
+            {/* Mode & Country Preset Selector Bar */}
+            <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="flex items-center gap-2">
+                  <UserCheck className="w-5 h-5 text-blue-600" />
+                  <h3 className="font-bold text-sm text-slate-900 dark:text-white">
+                    Passport &amp; Visa Specifications
+                  </h3>
+                </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-              {PASSPORT_PRESETS.map((preset) => {
-                const isSelected = selectedPreset.id === preset.id;
-                return (
+                {/* Mode Switcher Tabs */}
+                <div className="flex items-center p-1 bg-slate-100 dark:bg-slate-800 rounded-xl">
                   <button
-                    key={preset.id}
-                    onClick={() => setSelectedPreset(preset)}
-                    className={`p-4 rounded-xl border text-left transition-all ${
-                      isSelected
-                        ? 'border-blue-500 bg-blue-50/70 dark:bg-blue-950/40 ring-2 ring-blue-500/20'
-                        : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:border-slate-300'
+                    onClick={() => {
+                      setControlMode('auto');
+                      applySmartAutoCrop(loadedImg, selectedPreset);
+                    }}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                      controlMode === 'auto'
+                        ? 'bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-xs'
+                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
                     }`}
                   >
-                    <p className="font-bold text-sm text-slate-900 dark:text-white">
-                      {preset.country}
-                    </p>
-                    <p className="text-xs text-blue-600 dark:text-blue-400 font-semibold mt-0.5">
-                      {preset.widthMm} × {preset.heightMm} mm ({preset.pixelWidth}×{preset.pixelHeight} px)
-                    </p>
-                    <p className="text-[11px] text-slate-500 mt-1 line-clamp-2">
-                      {preset.description}
-                    </p>
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>Auto Smart Framing</span>
                   </button>
-                );
-              })}
-            </div>
-
-            {/* Print Sheet Options */}
-            <div className="p-4 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <Printer className="w-5 h-5 text-slate-600 dark:text-slate-300" />
-                <div>
-                  <h4 className="font-semibold text-sm text-slate-900 dark:text-white">
-                    4x6 Inch Printable Sheet
-                  </h4>
-                  <p className="text-xs text-slate-500">
-                    Arrange multiple photos with cut lines to print at home or any photo kiosk.
-                  </p>
+                  <button
+                    onClick={() => setControlMode('manual')}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                      controlMode === 'manual'
+                        ? 'bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-xs'
+                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                    }`}
+                  >
+                    <Sliders className="w-3.5 h-3.5" />
+                    <span>Manual Studio Edit</span>
+                  </button>
                 </div>
               </div>
-              <div className="flex items-center gap-4">
-                <label className="flex items-center gap-2 text-xs font-semibold text-slate-700 dark:text-slate-300 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={generateSheet}
-                    onChange={(e) => setGenerateSheet(e.target.checked)}
-                    className="w-4 h-4 rounded text-blue-600"
-                  />
-                  <span>Generate Printable Sheet</span>
-                </label>
-                {generateSheet && (
-                  <select
-                    value={copiesCount}
-                    onChange={(e) => setCopiesCount(Number(e.target.value))}
-                    className="px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-600 text-xs bg-slate-50 dark:bg-slate-700 text-slate-800 dark:text-slate-200"
-                  >
-                    <option value={2}>2 Copies</option>
-                    <option value={4}>4 Copies</option>
-                    <option value={6}>6 Copies</option>
-                  </select>
-                )}
+
+              {/* Country Preset Cards */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
+                {PASSPORT_PRESETS.map((preset) => {
+                  const isSelected = selectedPreset.id === preset.id;
+                  return (
+                    <button
+                      key={preset.id}
+                      onClick={() => setSelectedPreset(preset)}
+                      className={`p-3 rounded-xl border text-left transition-all ${
+                        isSelected
+                          ? 'border-blue-500 bg-blue-50/70 dark:bg-blue-950/40 ring-2 ring-blue-500/20'
+                          : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:border-slate-300'
+                      }`}
+                    >
+                      <p className="font-bold text-xs text-slate-900 dark:text-white truncate">
+                        {preset.country}
+                      </p>
+                      <p className="text-[11px] text-blue-600 dark:text-blue-400 font-semibold mt-0.5">
+                        {preset.widthMm} × {preset.heightMm} mm
+                      </p>
+                      <p className="text-[10px] text-slate-500 mt-0.5">
+                        {preset.pixelWidth}×{preset.pixelHeight} px
+                      </p>
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
-            {/* Biometric alignment canvas */}
-            <div className="flex flex-col items-center justify-center p-4 bg-slate-100 dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-700">
-              <canvas
-                ref={previewRef}
-                className="max-w-full rounded-lg shadow-sm border border-slate-300 dark:border-slate-700"
-              />
-              <div className="flex items-center gap-2 mt-3 text-xs text-emerald-600 dark:text-emerald-400 font-medium">
-                <Info className="w-4 h-4" />
-                <span>Align head inside the green oval and eyes along the dashed line.</span>
-              </div>
-            </div>
+            {/* Split Screen Studio Workspace */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+              {/* Left 6 Cols: Interactive Canvas & Guides */}
+              <div className="lg:col-span-6 space-y-4">
+                <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                      <Move className="w-3.5 h-3.5 text-blue-500" />
+                      Interactive Biometric Alignment
+                    </span>
+                    <span className="text-[11px] text-slate-400">
+                      Drag canvas to reposition face
+                    </span>
+                  </div>
 
-            <div className="flex justify-end">
-              <button
-                onClick={handleGenerate}
-                disabled={isProcessing}
-                className="flex items-center gap-2 px-6 py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm shadow-md shadow-blue-500/20 disabled:opacity-50 transition-all cursor-pointer"
-              >
-                <Sparkles className="w-4 h-4" />
-                <span>{isProcessing ? 'Generating...' : 'Generate Passport Photo'}</span>
-              </button>
+                  {/* Alignment Canvas */}
+                  <div className="flex flex-col items-center justify-center p-3 bg-slate-950 rounded-xl border border-slate-800 overflow-hidden relative select-none">
+                    <canvas
+                      ref={alignCanvasRef}
+                      onMouseDown={handleMouseDown}
+                      onMouseMove={handleMouseMove}
+                      onMouseUp={handleMouseUp}
+                      onMouseLeave={handleMouseUp}
+                      className="max-w-full rounded shadow-sm cursor-grab active:cursor-grabbing"
+                    />
+                    <div className="absolute top-4 right-4 bg-slate-900/80 backdrop-blur-xs text-[10px] text-emerald-400 px-2 py-1 rounded-md border border-emerald-500/30">
+                      Biometric Oval Match
+                    </div>
+                  </div>
+
+                  {/* Alignment Hints */}
+                  <div className="flex items-center gap-2 p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 text-[11px] text-emerald-800 dark:text-emerald-300">
+                    <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                    <span>
+                      Green oval marks official head size (60-70% height). Dashed line marks eye level.
+                    </span>
+                  </div>
+
+                  {/* Manual Sliders (when in Manual Mode or Auto fine-tune) */}
+                  <div className="space-y-3 pt-2 border-t border-slate-100 dark:border-slate-800">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <div className="flex justify-between text-xs mb-1">
+                          <span className="text-slate-600 dark:text-slate-400 flex items-center gap-1">
+                            <ZoomIn className="w-3 h-3 text-blue-500" /> Zoom
+                          </span>
+                          <span className="font-semibold text-slate-800 dark:text-slate-200">{zoomLevel}%</span>
+                        </div>
+                        <input
+                          type="range"
+                          min={60}
+                          max={220}
+                          step={2}
+                          value={zoomLevel}
+                          onChange={(e) => setZoomLevel(Number(e.target.value))}
+                          className="w-full accent-blue-600"
+                        />
+                      </div>
+
+                      <div>
+                        <div className="flex justify-between text-xs mb-1">
+                          <span className="text-slate-600 dark:text-slate-400 flex items-center gap-1">
+                            <Move className="w-3 h-3 text-blue-500" /> Head Oval Scale
+                          </span>
+                          <span className="font-semibold text-slate-800 dark:text-slate-200">{headGuideScale}%</span>
+                        </div>
+                        <input
+                          type="range"
+                          min={70}
+                          max={130}
+                          step={2}
+                          value={headGuideScale}
+                          onChange={(e) => setHeadGuideScale(Number(e.target.value))}
+                          className="w-full accent-blue-600"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Studio Color & Lighting Controls */}
+                    <div className="pt-2 space-y-3">
+                      {/* Background Color Picker */}
+                      <div>
+                        <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1.5">
+                          Studio Background Tint
+                        </label>
+                        <div className="flex flex-wrap items-center gap-2">
+                          {BG_OPTIONS.map((bg) => (
+                            <button
+                              key={bg.label}
+                              onClick={() => setBgColor(bg.color)}
+                              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs border transition-all ${
+                                bgColor === bg.color
+                                  ? 'border-blue-500 ring-2 ring-blue-500/20 font-semibold text-slate-900 dark:text-white'
+                                  : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400'
+                              }`}
+                            >
+                              <span className={`w-3 h-3 rounded-full border ${bg.class}`} />
+                              <span>{bg.label}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Lighting Controls */}
+                      <div className="grid grid-cols-3 gap-2 pt-1">
+                        <div>
+                          <div className="flex justify-between text-[11px] mb-1 text-slate-600 dark:text-slate-400">
+                            <span>Brightness</span>
+                            <span>{brightness > 0 ? `+${brightness}` : brightness}</span>
+                          </div>
+                          <input
+                            type="range"
+                            min={-40}
+                            max={40}
+                            step={2}
+                            value={brightness}
+                            onChange={(e) => setBrightness(Number(e.target.value))}
+                            className="w-full accent-blue-600"
+                          />
+                        </div>
+                        <div>
+                          <div className="flex justify-between text-[11px] mb-1 text-slate-600 dark:text-slate-400">
+                            <span>Contrast</span>
+                            <span>{contrast > 0 ? `+${contrast}` : contrast}</span>
+                          </div>
+                          <input
+                            type="range"
+                            min={-40}
+                            max={40}
+                            step={2}
+                            value={contrast}
+                            onChange={(e) => setContrast(Number(e.target.value))}
+                            className="w-full accent-blue-600"
+                          />
+                        </div>
+                        <div>
+                          <div className="flex justify-between text-[11px] mb-1 text-slate-600 dark:text-slate-400">
+                            <span>Vibrancy</span>
+                            <span>{saturation > 0 ? `+${saturation}` : saturation}</span>
+                          </div>
+                          <input
+                            type="range"
+                            min={-40}
+                            max={40}
+                            step={2}
+                            value={saturation}
+                            onChange={(e) => setSaturation(Number(e.target.value))}
+                            className="w-full accent-blue-600"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Right 6 Cols: Live Screen Previews & Direct Downloads */}
+              <div className="lg:col-span-6 space-y-4">
+                <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
+                  <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800">
+                    <div className="flex items-center gap-2">
+                      <Eye className="w-4 h-4 text-emerald-600" />
+                      <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-800 dark:text-slate-200">
+                        Live Photo Previews
+                      </h4>
+                    </div>
+                    {isRenderingLive && (
+                      <span className="flex items-center gap-1 text-[11px] text-blue-500">
+                        <RefreshCw className="w-3 h-3 animate-spin" /> Rendering...
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Single Photo Card Preview */}
+                  <div className="flex flex-col sm:flex-row items-center gap-4 p-4 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700">
+                    {liveSingleUrl ? (
+                      <div className="w-32 h-32 rounded-lg overflow-hidden border-2 border-slate-300 dark:border-slate-600 bg-white shadow-sm flex items-center justify-center shrink-0">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={liveSingleUrl}
+                          alt="Passport Single"
+                          className="w-full h-full object-contain"
+                        />
+                      </div>
+                    ) : (
+                      <div className="w-32 h-32 rounded-lg bg-slate-200 dark:bg-slate-700 animate-pulse shrink-0" />
+                    )}
+
+                    <div className="space-y-1.5 flex-1 text-center sm:text-left">
+                      <h5 className="text-xs font-bold text-slate-900 dark:text-white">
+                        Single Official Photo ({selectedPreset.country})
+                      </h5>
+                      <p className="text-[11px] text-slate-500">
+                        Dimensions: {selectedPreset.widthMm} × {selectedPreset.heightMm} mm ({selectedPreset.pixelWidth} × {selectedPreset.pixelHeight} px @ 300 DPI)
+                      </p>
+                      <button
+                        onClick={handleDownloadSingle}
+                        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shadow-sm transition-colors mt-1"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        Download Single Photo
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* 4x6 Printable Sheet Section */}
+                  <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Printer className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                        <span className="text-xs font-bold text-slate-900 dark:text-white">
+                          4x6 Inch Printable Sheet
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <span className="text-[11px] text-slate-500">Copies:</span>
+                        <select
+                          value={copiesCount}
+                          onChange={(e) => setCopiesCount(Number(e.target.value))}
+                          className="text-xs px-2 py-1 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800"
+                        >
+                          <option value={2}>2 Copies</option>
+                          <option value={4}>4 Copies</option>
+                          <option value={6}>6 Copies</option>
+                          <option value={8}>8 Copies</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {liveSheetUrl && (
+                      <div className="rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700 bg-white shadow-xs">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={liveSheetUrl}
+                          alt="Printable 4x6 Sheet"
+                          className="w-full h-auto object-cover"
+                        />
+                      </div>
+                    )}
+
+                    <div className="flex flex-col sm:flex-row items-center gap-2 pt-1">
+                      <button
+                        onClick={handleDownloadSheet}
+                        className="w-full sm:flex-1 inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold shadow-sm transition-colors"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        Download 4x6&quot; Sheet (JPG)
+                      </button>
+                      <button
+                        onClick={() => window.print()}
+                        className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-semibold hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+                      >
+                        <Printer className="w-3.5 h-3.5" />
+                        Print Now
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         )}
-
-        <DownloadBar
-          items={downloadItems}
-          onReset={() => {
-            setFiles([]);
-            setDownloadItems([]);
-          }}
-          successTitle="Passport Photos Ready to Download!"
-        />
       </div>
     </ToolLayout>
   );

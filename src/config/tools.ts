@@ -403,9 +403,9 @@ export const TOOLS: ToolDefinition[] = [
   },
   {
     id: 'pdf-editor',
-    name: 'PDF Viewer & Annotator',
-    tagline: 'View, annotate, highlight, and sign PDF documents',
-    description: 'Interactive PDF workspace. Add text overlays, highlights, drawings, date stamps, and signature images directly onto any page and export.',
+    name: 'PDF Editor',
+    tagline: 'Edit text in PDF, change words with same font, sign & annotate',
+    description: 'Edit existing text in any PDF document with automatic font family & format preservation. Change names, dates, amounts, add signatures, highlights, and redact text directly in your browser.',
     category: 'pdf',
     route: '/pdf-tools/pdf-editor',
     iconName: 'Edit3',
@@ -414,17 +414,22 @@ export const TOOLS: ToolDefinition[] = [
     processingMode: 'browser',
     status: 'implemented',
     isPopular: true,
-    tags: ['pdf editor', 'annotate', 'signature', 'highlight', 'sign pdf'],
+    tags: ['pdf editor', 'edit pdf', 'edit text in pdf', 'change text', 'annotate', 'signature', 'highlight', 'sign pdf', 'same font'],
     features: [
-      'Page navigation with zoom in/out and fit-to-width controls',
-      'Add custom text notes and dates anywhere on the page',
-      'Draw freehand signatures or annotations',
-      'Permanent vector-level export preserving all annotations'
+      'In-place text editing with automatic font family (Helvetica, Times, Courier), weight, and size preservation',
+      'Click any word or sentence in the PDF to edit or replace text cleanly',
+      'Draw digital signatures and annotations with custom colors and brush sizes',
+      'Highlighter and blackout/whiteout redaction boxes to protect sensitive information',
+      'Multi-page navigation with thumbnail preview and vector-level PDF export'
     ],
     faqs: [
       {
-        question: 'Does this modify existing text in the PDF?',
-        answer: 'As clearly outlined, browser-based PDF editors add new annotation, text, and signature layers over the document. True editing of arbitrary font streams is fundamentally limited in client-side engines.'
+        question: 'Does this keep the exact same font when editing text in the PDF?',
+        answer: 'Yes! PixelKit detects the font family (Helvetica, Times Roman, or Courier), weight (Bold, Italic), and font size (pt) from the original PDF text stream and applies the exact matching font to your replacement text.'
+      },
+      {
+        question: 'Are my confidential documents uploaded to any server?',
+        answer: 'No. All PDF text scanning, replacement, and rendering happen 100% locally in your web browser.'
       }
     ],
     relatedToolIds: ['organize-pdf', 'pdf-to-image']
@@ -456,6 +461,94 @@ export const TOOLS: ToolDefinition[] = [
       }
     ],
     relatedToolIds: ['image-compressor', 'split-pdf']
+  },
+  {
+    id: 'pdf-to-excel',
+    name: 'PDF to Excel & CSV Converter',
+    tagline: 'Extract tables and structured data from PDF into XLSX or CSV',
+    description: 'Convert PDF tables, financial reports, and structured invoices into editable Excel spreadsheets (.xlsx) and CSV files directly in your browser.',
+    category: 'pdf',
+    route: '/pdf-tools/pdf-to-excel',
+    iconName: 'FileSpreadsheet',
+    acceptedFormats: ['application/pdf'],
+    maxFileSizeMB: 80,
+    processingMode: 'browser',
+    status: 'implemented',
+    isPopular: true,
+    tags: ['pdf to excel', 'pdf to csv', 'extract table', 'spreadsheet', 'xlsx'],
+    features: [
+      'Extracts coordinate-positioned text items into structured rows and columns',
+      'Instant interactive grid table preview',
+      'Download as Excel workbook (.xlsx) or comma-separated CSV (.csv)',
+      '100% Client-side — ideal for private bank statements and invoices'
+    ],
+    faqs: [
+      {
+        question: 'Does this work with scanned PDFs?',
+        answer: 'For scanned PDFs containing images of text, use our OCR & Text Extractor tool first. This tool is optimized for native vector PDFs containing text streams.'
+      },
+      {
+        question: 'Are my financial statements or invoices uploaded anywhere?',
+        answer: 'No. Extraction is executed directly in your browser using Mozilla PDF.js and SheetJS. Zero data leaves your machine.'
+      }
+    ],
+    relatedToolIds: ['excel-to-pdf', 'pdf-to-image', 'ocr']
+  },
+  {
+    id: 'text-to-pdf',
+    name: 'Text & Notes to PDF Converter',
+    tagline: 'Transform raw text, notes, and markdown into formatted PDFs',
+    description: 'Convert plain text, study notes, or markdown documents into clean, multi-page PDF files with page margins, headers, footers, and page numbers.',
+    category: 'pdf',
+    route: '/pdf-tools/text-to-pdf',
+    iconName: 'FileText',
+    acceptedFormats: ['text/plain', '.md', '.txt'],
+    maxFileSizeMB: 20,
+    processingMode: 'browser',
+    status: 'implemented',
+    isPopular: true,
+    tags: ['text to pdf', 'txt to pdf', 'markdown to pdf', 'notes to pdf', 'document'],
+    features: [
+      'Automatic word wrapping and multi-page pagination',
+      'Configurable page sizes (A4, Letter) and orientation',
+      'Custom title banner and automatic "Page X of Y" footers',
+      'Supports markdown headings (# and ##) formatting'
+    ],
+    faqs: [
+      {
+        question: 'Can I paste long articles or essays?',
+        answer: 'Yes! The engine will calculate exact line heights and cleanly split your content across pages with proper margins.'
+      }
+    ],
+    relatedToolIds: ['pdf-to-excel', 'video-notes-to-pdf', 'image-to-pdf']
+  },
+  {
+    id: 'excel-to-pdf',
+    name: 'Excel & CSV to PDF Converter',
+    tagline: 'Convert spreadsheets into beautifully styled PDF tables',
+    description: 'Convert Excel workbooks (.xlsx, .xls) and CSV sheets into professional PDF reports with formatted table headers, borders, zebra striping, and auto-pagination.',
+    category: 'pdf',
+    route: '/pdf-tools/excel-to-pdf',
+    iconName: 'Table',
+    acceptedFormats: ['.xlsx', '.xls', '.csv', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'text/csv'],
+    maxFileSizeMB: 50,
+    processingMode: 'browser',
+    status: 'implemented',
+    isPopular: true,
+    tags: ['excel to pdf', 'csv to pdf', 'xlsx to pdf', 'spreadsheet to pdf', 'table'],
+    features: [
+      'Reads .xlsx, .xls, and .csv files via client-side SheetJS engine',
+      'Live interactive sheet preview',
+      'Customizable landscape/portrait layout with automatic column distribution',
+      'Professional table borders, zebra striping, and page number footers'
+    ],
+    faqs: [
+      {
+        question: 'What happens to large spreadsheets with dozens of columns?',
+        answer: 'Select the Landscape orientation mode for wide tables. The columns will automatically scale to fit the printable page width.'
+      }
+    ],
+    relatedToolIds: ['pdf-to-excel', 'text-to-pdf', 'merge-pdf']
   },
 
   // --- AI & INTELLIGENT TOOLS ---
@@ -514,6 +607,39 @@ export const TOOLS: ToolDefinition[] = [
       }
     ],
     relatedToolIds: ['ocr', 'document-tools']
+  },
+  {
+    id: 'video-notes-to-pdf',
+    name: 'Video Notes & Lecture to PDF',
+    tagline: 'Capture video moments, take notes & export a study guide PDF',
+    description: 'Transform video lectures, tutorials, and webinars into formatted study guides. Scrub through your video, capture timestamped slides/frames, add custom markdown notes, and compile into a printable PDF.',
+    category: 'ai',
+    route: '/ai-tools/video-notes-to-pdf',
+    iconName: 'Video',
+    acceptedFormats: ['video/mp4', 'video/webm', 'video/ogg', 'video/quicktime'],
+    maxFileSizeMB: 500,
+    processingMode: 'browser',
+    status: 'implemented',
+    isPopular: true,
+    tags: ['video notes', 'video to pdf', 'lecture notes', 'study guide', 'timestamped notes', 'slides to pdf'],
+    features: [
+      'Load local video files (MP4, WebM, MOV) with instant playback and frame-accurate scrubbing',
+      'One-click timestamped slide and frame snapshot capture directly from video stream',
+      'Rich multi-line notes editor for each captured frame with markdown formatting',
+      'Export multi-page professional PDF study guide with screenshots, timestamps, and notes',
+      '100% Client-side privacy — heavy video files stay on your device without server upload'
+    ],
+    faqs: [
+      {
+        question: 'Are my video files uploaded to any server?',
+        answer: 'No! Videos are played and processed directly in your browser using the HTML5 Video and Canvas APIs. Even gigabyte-sized recordings never leave your machine.'
+      },
+      {
+        question: 'What video formats are supported?',
+        answer: 'PixelKit supports all HTML5 video formats natively supported by your browser, including MP4, WebM, Ogg, and MOV.'
+      }
+    ],
+    relatedToolIds: ['text-to-pdf', 'ocr', 'pdf-summarizer']
   },
 
   // --- DOCUMENT TOOLS ---

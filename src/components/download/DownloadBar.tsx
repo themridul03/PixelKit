@@ -4,6 +4,7 @@ import React from 'react';
 import { Download, RefreshCw, CheckCircle2, Archive, ArrowRight } from 'lucide-react';
 import { formatBytes, calculateReduction } from '@/lib/utils/format';
 import { downloadBlob, downloadZip } from '@/lib/utils/download';
+import { AdBanner } from '@/components/ads/AdBanner';
 
 export interface DownloadItem {
   name: string;
@@ -116,6 +117,11 @@ export function DownloadBar({
           ))}
         </div>
       )}
+
+      {/* Post-Download Monetization Slot */}
+      <div className="pt-2">
+        <AdBanner format="horizontal" />
+      </div>
     </div>
   );
 }

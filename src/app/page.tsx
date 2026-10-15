@@ -31,6 +31,7 @@ import {
   ChevronDown
 } from 'lucide-react';
 import { TOOLS, CATEGORIES } from '@/config/tools';
+import { AdBanner } from '@/components/ads/AdBanner';
 
 export default function HomePage() {
   const [searchQuery, setSearchQuery] = useState('');
@@ -140,6 +141,13 @@ export default function HomePage() {
             <div className="flex flex-wrap items-center justify-center gap-2 mt-4 text-xs text-slate-500">
               <span className="font-semibold text-slate-600 dark:text-slate-400">Quick Access:</span>
               <Link
+                href="/pdf-tools/pdf-editor"
+                className="px-2.5 py-1 rounded-lg bg-blue-100 dark:bg-blue-900/50 hover:bg-blue-200 dark:hover:bg-blue-800 text-blue-700 dark:text-blue-300 font-bold transition-colors flex items-center gap-1 shadow-xs"
+              >
+                <Sparkles className="w-3 h-3 text-blue-600 dark:text-blue-400" />
+                <span>PDF Editor</span>
+              </Link>
+              <Link
                 href="/image-tools/image-compressor"
                 className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-blue-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-medium transition-colors"
               >
@@ -230,6 +238,11 @@ export default function HomePage() {
               </Link>
             );
           })}
+        </div>
+
+        {/* Homepage Leaderboard Monetization Slot */}
+        <div className="pt-8">
+          <AdBanner format="leaderboard" />
         </div>
       </section>
 

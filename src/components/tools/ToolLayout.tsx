@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { ToolDefinition } from '@/types/tools';
 import { TOOLS } from '@/config/tools';
+import { AdBanner } from '@/components/ads/AdBanner';
 
 interface ToolLayoutProps {
   tool: ToolDefinition;
@@ -91,6 +92,9 @@ export function ToolLayout({ tool, children }: ToolLayoutProps) {
         <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-6 sm:p-8 shadow-xs">
           {children}
         </div>
+
+        {/* High-Earning Monetization / Ad Slot */}
+        <AdBanner format="horizontal" />
 
         {/* How it works & Features */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4">
